@@ -1,0 +1,11 @@
+# Ignore JetBrains Rider project-specific files
+.idea/
+*.suo
+*.user
+*.userosscache
+*.sln.docstates
+
+# Ignore build output directories
+bin/
+obj/
+files/
