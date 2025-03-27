@@ -4,9 +4,17 @@ using System.Text.Json.Nodes;
 
 var rootDirectory = @"..\..\..\files";
 
+// + filename
+var sortedFilesDirectory = @"..\..\..\sortedFiles\";
+
 try
 {
-    ReadFilesRecursively(rootDirectory);
+    var gzFiles = GetFilePaths(rootDirectory);
+
+    var collections = GroupFilesByName(gzFiles);
+
+    ComposeDuplicateFiles(collections);
+    // ReadFilesRecursively(gzFiles);
 }
 catch (Exception ex)
 {
@@ -16,16 +24,27 @@ catch (Exception ex)
 
 return;
 
+void ComposeDuplicateFiles(List<DateCollection> collections)
+{
+    foreach (var collection in collections)
+    {
+        using StreamWriter writer = new StreamWriter(sortedFilesDirectory + collection.Date);
+        foreach (string filePath in collection.FilePaths)
+        {
+            var reader = OpenGzipFile(filePath);
+            var fileContents = reader.ReadToEnd();
+            writer.Write(fileContents);
+        }
+    }
+}
 
-void ReadFilesRecursively(string directory)
+void ReadFilesRecursively(string[] directories)
 {
     try
     {
-        string[] gzFiles = Directory.GetFiles(directory, "*.gz", SearchOption.AllDirectories);
-
-        foreach (string filePath in gzFiles)
+        foreach (string filePath in directories)
         {
-            Stopwatch totalProcessingTimer = new Stopwatch();
+            var totalProcessingTimer = new Stopwatch();
             totalProcessingTimer.Start();
             ProcessGzipFile(filePath);
 
@@ -35,52 +54,61 @@ void ReadFilesRecursively(string directory)
     }
     catch (Exception ex)
     {
-        Console.WriteLine($"Error reading directory {directory}: {ex.Message}");
+        Console.WriteLine($"Error reading directory {directories}: {ex.Message}");
     }
+}
+
+
+string[] GetFilePaths(string directory)
+{
+    return Directory.GetFiles(directory, "*.gz", SearchOption.AllDirectories);
 }
 
 void ProcessGzipFile(string filePath)
 {
-    using (FileStream fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read))
-    using (GZipStream gzipStream = new GZipStream(fileStream, CompressionMode.Decompress))
-    using (StreamReader reader = new StreamReader(gzipStream))
+    using var reader = OpenGzipFile(filePath);
+    var maxJsonSize = 0;
+    var largestLine = "";
+
+    while (reader.ReadLine() is { } line)
     {
-        var maxJsonSize = 0;
-        var largestLine = "";
-        while (reader.ReadLine() is { } line)
+        try
         {
-            try
+            var jsonNode = JsonNode.Parse(line);
+            if (jsonNode != null)
             {
-                var jsonNode = JsonNode.Parse(line);
-                if (jsonNode != null)
+                var lastElementSize = GetLastElementSize(jsonNode);
+                jsonNode.AsArray().RemoveAt(0);
+                var jsonString = jsonNode?.ToJsonString();
+
+                if (lastElementSize > maxJsonSize)
                 {
-                    var lastElementSize = GetLastElementSize(jsonNode);
-                    jsonNode.AsArray().RemoveAt(0);
-                    var jsonString = jsonNode?.ToJsonString();
-                    // Console.WriteLine(jsonString);
-                    // Console.WriteLine(lastElementSize);
-                    if (lastElementSize > maxJsonSize)
-                    {
-                        maxJsonSize = lastElementSize;
-                        largestLine = jsonString;
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Line was null");
+                    maxJsonSize = lastElementSize;
+                    largestLine = jsonString;
                 }
             }
-            catch (Exception ex)
+            else
             {
-                // Skip every json failed line comletely
-                Console.WriteLine(ex.Message);
+                Console.WriteLine("Line was null");
             }
         }
-
-        Console.WriteLine("Largest json size: " + maxJsonSize);
-        Console.WriteLine("Largest json line: " + largestLine);
+        catch (Exception ex)
+        {
+            Console.WriteLine(ex.Message);
+        }
     }
+
+    Console.WriteLine("Largest json size: " + maxJsonSize);
+    Console.WriteLine("Largest json line: " + largestLine);
 }
+
+StreamReader OpenGzipFile(string filePath)
+{
+    var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
+    var gzipStream = new GZipStream(fileStream, CompressionMode.Decompress);
+    return new StreamReader(gzipStream);
+}
+
 
 int GetLastElementSize(JsonNode jsonNode)
 {
@@ -104,4 +132,28 @@ int GetLastElementSize(JsonNode jsonNode)
     {
         throw new InvalidOperationException("JSON array is empty");
     }
+}
+
+List<DateCollection> GroupFilesByName(string[] filePaths)
+{
+    var groupedFiles = filePaths
+        .GroupBy(path => Path.GetFileName(path))
+        .Select(g => new DateCollection(
+            g.Key,
+            g.ToList()
+        ));
+    return groupedFiles.ToList();
+}
+
+internal class DateCollection(string date, List<string> filePaths)
+{
+    private string _date = date[..^2] + "txt";
+
+    public string Date
+    {
+        get => _date;
+        set => _date = value[..^2] + "txt";
+    }
+
+    public List<string> FilePaths { get; set; } = filePaths;
 }
