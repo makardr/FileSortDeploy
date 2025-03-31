@@ -6,109 +6,127 @@ using System.Text.Json.Nodes;
 
 var rootDirectory = @"..\..\..\files";
 
-// + filename
-var mergedFilesDirectory = @"..\..\..\mergedFiles\";
-var sortedFilesDirectory = @"..\..\..\sortedFiles\";
-
 try
 {
-    ComposeDuplicateFiles(GroupFilesByName(GetFilePaths(rootDirectory, "*.gz")));
-
-    SortFiles(GetFilePaths(mergedFilesDirectory[..^1], "*.txt"));
-
-    ProcessFiles(GetFilePaths(sortedFilesDirectory[..^1], "*.txt"));
+    //8535 ms
+    //6487 ms
+    //5919 ms
+    using (new StopwatchTimer("Process finished in: "))
+    {
+        var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
+        foreach (var collection in fileCollections)
+        {
+            FileWrite(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
+                @"..\..\..\mergedFiles\" + collection.Date);
+        }
+    }
 }
 catch (Exception ex)
 {
     Console.WriteLine($"An error occurred: {ex.Message}");
 }
 
-
 return;
 
-void ComposeDuplicateFiles(List<DateCollection> collections)
+string ReadComposeFile(DateCollection collection)
 {
-    foreach (var collection in collections)
+    var mergedFilesBuilder = new StringBuilder();
+    foreach (string filePath in collection.FilePaths)
     {
-        using StreamWriter writer = new StreamWriter(mergedFilesDirectory + collection.Date);
-        foreach (string filePath in collection.FilePaths)
-        {
-            var reader = OpenGzipFile(filePath);
-            var fileContents = reader.ReadToEnd();
-            writer.Write(fileContents);
-        }
+        var reader = OpenGzipFile(filePath);
+        mergedFilesBuilder.AppendLine(reader.ReadToEnd());
     }
+
+    return mergedFilesBuilder.ToString();
 }
 
-void SortFiles(string[] filePaths)
+string[] ConvertComposedFile(string file)
 {
-    foreach (var path in filePaths)
-    {
-        SortLinesInFile(path);
-    }
-}
+    List<string> stringList = [];
 
-void ProcessFiles(string[] filePaths)
-{
-    foreach (var path in filePaths)
-    {
-        RewriteRemoveFirstElement(path);
-    }
-}
-
-
-string[] GetFilePaths(string directory, string pattern)
-{
-    return Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
-}
-
-// Remove first element and count the largest line size
-void RewriteRemoveFirstElement(string filePath)
-{
-    var maxJsonSize = 0;
-    var largestLine = "";
-    var sb = new StringBuilder();
-
-    using (var reader = new StreamReader(filePath))
+    using (StringReader reader = new StringReader(file))
     {
         while (reader.ReadLine() is { } line)
+        {
+            stringList.Add(line);
+        }
+    }
+
+    return stringList.ToArray();
+}
+
+string[] SortLines(string[] inputFilePath)
+{
+    return inputFilePath
+        .Select(line =>
         {
             try
             {
                 var jsonNode = JsonNode.Parse(line);
-                if (jsonNode != null)
+                return new
                 {
-                    var lastElementSize = GetLastElementSize(jsonNode);
-                    jsonNode.AsArray().RemoveAt(0);
-                    var jsonString = jsonNode.ToJsonString();
-                    sb.AppendLine(jsonString);
-
-                    if (lastElementSize > maxJsonSize)
-                    {
-                        maxJsonSize = lastElementSize;
-                        largestLine = jsonString;
-                    }
-                }
-                else
-                {
-                    Console.WriteLine("Line was null");
-                }
+                    OriginalLine = line,
+                    FirstTimestamp = jsonNode[0].GetValue<long>()
+                };
+            }
+            catch (JsonException)
+            {
+                // Console.WriteLine($"Could not parse line: {line}");
+                return null;
             }
             catch (Exception ex)
             {
-                Console.WriteLine(ex.Message);
+                // Console.WriteLine($"Unexpected error parsing line: {line}. Error: {ex.Message}");
+                return null;
+            }
+        })
+        .Where(x => x != null)
+        .OrderBy(x => x.FirstTimestamp)
+        .Select(x => x.OriginalLine)
+        .ToArray();
+}
+
+string ProcessFileJson(string[] lines)
+{
+    // var maxJsonSize = 0;
+    // var largestLine = "";
+    var processedFileBuilder = new StringBuilder();
+
+    foreach (var line in lines)
+    {
+        try
+        {
+            var jsonNode = JsonNode.Parse(line);
+            if (jsonNode != null)
+            {
+                jsonNode.AsArray().RemoveAt(0);
+                var jsonString = jsonNode.ToJsonString();
+                processedFileBuilder.AppendLine(jsonString);
+
+
+                // var lastElementSize = GetLastElementSize(jsonNode);
+                // if (lastElementSize > maxJsonSize)
+                // {
+                //     maxJsonSize = lastElementSize;
+                //     largestLine = jsonString;
+                // }
+            }
+            else
+            {
+                // Console.WriteLine("Line was null");
             }
         }
-
-        Console.WriteLine("Largest json size: " + maxJsonSize);
-        Console.WriteLine("Largest json line: " + largestLine);
+        catch (Exception ex)
+        {
+            // Console.WriteLine(ex.Message);
+        }
     }
 
-    using (var writer = new StreamWriter(filePath))
-    {
-        writer.WriteLine(sb.ToString());
-    }
+    // Console.WriteLine("Largest json size: " + maxJsonSize);
+    // Console.WriteLine("Largest json line: " + largestLine);
+    return processedFileBuilder.ToString();
 }
+
 
 StreamReader OpenGzipFile(string filePath)
 {
@@ -142,39 +160,15 @@ int GetLastElementSize(JsonNode jsonNode)
     }
 }
 
-void SortLinesInFile(string inputFilePath)
+string[] GetFilePaths(string directory, string pattern)
 {
-    var sortedLines = File.ReadAllLines(inputFilePath)
-        .Select(line =>
-        {
-            try
-            {
-                var jsonNode = JsonNode.Parse(line);
-                return new
-                {
-                    OriginalLine = line,
-                    FirstTimestamp = jsonNode[0].GetValue<long>()
-                };
-            }
-            catch (JsonException)
-            {
-                Console.WriteLine($"Could not parse line: {line}");
-                return null;
-            }
-            catch (Exception ex)
-            {
-                Console.WriteLine($"Unexpected error parsing line: {line}. Error: {ex.Message}");
-                return null;
-            }
-        })
-        .Where(x => x != null)
-        .OrderBy(x => x.FirstTimestamp)
-        .Select(x => x.OriginalLine)
-        .ToArray();
-
-    File.WriteAllLines(sortedFilesDirectory + Path.GetFileName(inputFilePath), sortedLines);
+    return Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
 }
 
+void FileWrite(string file, string path)
+{
+    File.WriteAllText(path, file);
+}
 
 List<DateCollection> GroupFilesByName(string[] filePaths)
 {
@@ -198,4 +192,15 @@ internal class DateCollection(string date, List<string> filePaths)
     }
 
     public List<string> FilePaths { get; set; } = filePaths;
+}
+
+internal class StopwatchTimer(string message = "Elapsed time") : IDisposable
+{
+    private readonly Stopwatch _stopwatch = Stopwatch.StartNew();
+
+    public void Dispose()
+    {
+        _stopwatch.Stop();
+        Console.WriteLine($"{message}: {_stopwatch.ElapsedMilliseconds} ms");
+    }
 }

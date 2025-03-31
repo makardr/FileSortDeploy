@@ -8,7 +8,7 @@
     </PropertyGroup>
 
     <ItemGroup>
-      <Folder Include="sortedFiles\" />
+      <Folder Include="mergedFiles\" />
     </ItemGroup>
 
 </Project>
