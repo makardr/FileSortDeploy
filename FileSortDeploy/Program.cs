@@ -11,16 +11,18 @@ try
     //8535 ms
     //6487 ms
     //5919 ms
+    //2913 ms
     using (new StopwatchTimer("Process finished in: "))
     {
         var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
-        foreach (var collection in fileCollections)
+        
+        Parallel.ForEach(fileCollections, collection =>
         {
-            FileWrite(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
-                @"..\..\..\mergedFiles\" + collection.Date);
-        }
+            FileWrite(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))), @"..\..\..\mergedFiles\" + collection.Date);
+        });
     }
 }
+
 catch (Exception ex)
 {
     Console.WriteLine($"An error occurred: {ex.Message}");
@@ -167,7 +169,7 @@ string[] GetFilePaths(string directory, string pattern)
 
 void FileWrite(string file, string path)
 {
-    File.WriteAllText(path, file);
+    File.WriteAllTextAsync(path, file);
 }
 
 List<DateCollection> GroupFilesByName(string[] filePaths)
