@@ -8,18 +8,43 @@ var rootDirectory = @"..\..\..\files";
 
 try
 {
-    //8535 ms
-    //6487 ms
-    //5919 ms
-    //2913 ms
     using (new StopwatchTimer("Process finished in: "))
     {
         var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
-        
-        Parallel.ForEach(fileCollections, collection =>
-        {
-            FileWrite(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))), @"..\..\..\mergedFiles\" + collection.Date);
-        });
+
+        Parallel.ForEach(fileCollections, new ParallelOptions { MaxDegreeOfParallelism = 3 },
+            collection =>
+            {
+                if (!File.Exists(resultDirectory + collection.Date))
+                {
+                    using (new StopwatchTimer($"Date {collection.Date} finished processing in: "))
+                    {
+                        try
+                        {
+                            Console.WriteLine($"Start Processing file {collection.Date}");
+                            WriteFile(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
+                                resultDirectory + collection.Date);
+                        }
+                        catch (OutOfMemoryException e)
+                        {
+                            //Attempt to process using slower method reading file line by line
+                            WriteArrayFile(ProcessJsonList(SortLines(ReadComposeFileLines(collection))),
+                                resultDirectory + collection.Date);
+                        }
+                        catch (Exception e)
+                        {
+                            Console.Write($"File {collection.Date} errored out with an exception ");
+                            Console.WriteLine(e);
+                        }
+                    }
+                }
+                else
+                {
+                    Console.WriteLine($"File skipped {collection.Date}");
+                }
+            });
+
+        // var historicalOrderPaths = GetFilePathsHistorically(resultDirectory, "*.txt");
     }
 }
 
@@ -42,6 +67,22 @@ string ReadComposeFile(DateCollection collection)
     return mergedFilesBuilder.ToString();
 }
 
+string?[] ReadComposeFileLines(DateCollection collection)
+{
+    var lines = new List<string?>();
+
+    foreach (string filePath in collection.FilePaths)
+    {
+        using var reader = OpenGzipFile(filePath);
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+    }
+
+    return lines.ToArray();
+}
+
 string[] ConvertComposedFile(string file)
 {
     List<string> stringList = [];
@@ -57,7 +98,7 @@ string[] ConvertComposedFile(string file)
     return stringList.ToArray();
 }
 
-string[] SortLines(string[] inputFilePath)
+string[] SortLines(string?[] inputFilePath)
 {
     return inputFilePath
         .Select(line =>
@@ -130,6 +171,36 @@ string ProcessFileJson(string[] lines)
 }
 
 
+string[] ProcessJsonList(string[] lines)
+{
+    List<string> stringList = [];
+
+    foreach (var line in lines)
+    {
+        try
+        {
+            var jsonNode = JsonNode.Parse(line);
+            if (jsonNode != null)
+            {
+                jsonNode.AsArray().RemoveAt(0);
+                var jsonString = jsonNode.ToJsonString();
+                stringList.Add(jsonString);
+            }
+            else
+            {
+                // Console.WriteLine("Line was null");
+            }
+        }
+        catch (Exception ex)
+        {
+            // Console.WriteLine(ex.Message);
+        }
+    }
+
+    return stringList.ToArray();
+}
+
+
 StreamReader OpenGzipFile(string filePath)
 {
     var fileStream = new FileStream(filePath, FileMode.Open, FileAccess.Read);
@@ -162,14 +233,52 @@ int GetLastElementSize(JsonNode jsonNode)
     }
 }
 
+string[] GetFilePathsHistorically(string directory, string pattern)
+{
+    string[] filePaths = Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
+
+    Array.Sort(filePaths, (a, b) =>
+    {
+        var fileNameA = Path.GetFileNameWithoutExtension(a);
+        var fileNameB = Path.GetFileNameWithoutExtension(b);
+
+        if (DateTime.TryParse(fileNameA, out var dateA) &&
+            DateTime.TryParse(fileNameB, out var dateB))
+        {
+            return DateTime.Compare(dateA, dateB);
+        }
+
+        return string.CompareOrdinal(fileNameA, fileNameB);
+    });
+
+    return filePaths;
+}
+
 string[] GetFilePaths(string directory, string pattern)
 {
     return Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
 }
 
-void FileWrite(string file, string path)
+void WriteFile(string file, string path)
 {
-    File.WriteAllTextAsync(path, file);
+    Console.WriteLine($"File written {path}");
+    File.WriteAllText(path, file);
+}
+
+void WriteArrayFile(string[] lines, string filePath)
+{
+    using (StreamWriter writer = new StreamWriter(filePath))
+    {
+        foreach (string line in lines)
+        {
+            writer.WriteLine(line);
+        }
+    }
+}
+
+void FileDelete(string path)
+{
+    File.Delete(path);
 }
 
 List<DateCollection> GroupFilesByName(string[] filePaths)
