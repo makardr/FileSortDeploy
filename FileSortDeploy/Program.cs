@@ -10,41 +10,53 @@ try
 {
     using (new StopwatchTimer("Process finished in: "))
     {
-        var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
+        // Unpack, read and sort files 
+        // var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
+        //
+        // Parallel.ForEach(fileCollections, new ParallelOptions { MaxDegreeOfParallelism = 3 },
+        //     collection =>
+        //     {
+        //         if (!File.Exists(resultDirectory + collection.Date))
+        //         {
+        //             using (new StopwatchTimer($"Date {collection.Date} finished processing in: "))
+        //             {
+        //                 try
+        //                 {
+        //                     Console.WriteLine($"Start Processing file {collection.Date}");
+        //                     WriteFile(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
+        //                         resultDirectory + collection.Date);
+        //                 }
+        //                 catch (OutOfMemoryException e)
+        //                 {
+        //                     //Attempt to process using slower method reading file line by line
+        //                     WriteArrayFile(ProcessJsonList(SortLines(ReadComposeFileLines(collection))),
+        //                         resultDirectory + collection.Date);
+        //                 }
+        //                 catch (Exception e)
+        //                 {
+        //                     Console.Write($"File {collection.Date} errored out with an exception ");
+        //                     Console.WriteLine(e);
+        //                 }
+        //             }
+        //         }
+        //         else
+        //         {
+        //             Console.WriteLine($"File skipped {collection.Date}");
+        //         }
+        //     });
 
-        Parallel.ForEach(fileCollections, new ParallelOptions { MaxDegreeOfParallelism = 3 },
-            collection =>
-            {
-                if (!File.Exists(resultDirectory + collection.Date))
-                {
-                    using (new StopwatchTimer($"Date {collection.Date} finished processing in: "))
-                    {
-                        try
-                        {
-                            Console.WriteLine($"Start Processing file {collection.Date}");
-                            WriteFile(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
-                                resultDirectory + collection.Date);
-                        }
-                        catch (OutOfMemoryException e)
-                        {
-                            //Attempt to process using slower method reading file line by line
-                            WriteArrayFile(ProcessJsonList(SortLines(ReadComposeFileLines(collection))),
-                                resultDirectory + collection.Date);
-                        }
-                        catch (Exception e)
-                        {
-                            Console.Write($"File {collection.Date} errored out with an exception ");
-                            Console.WriteLine(e);
-                        }
-                    }
-                }
-                else
-                {
-                    Console.WriteLine($"File skipped {collection.Date}");
-                }
-            });
 
+        // Partition files
         // var historicalOrderPaths = GetFilePathsHistorically(resultDirectory, "*.txt");
+        // foreach (var path in historicalOrderPaths)
+        // {
+        //     using (new StopwatchTimer($"Date {path[..^14]} finished processing in: "))
+        //     {
+        //         PartitionFileWrite(path, partitionResultDirectory);
+        //     }
+        //     
+        //     FileDelete(path);
+        // }
     }
 }
 
@@ -54,6 +66,39 @@ catch (Exception ex)
 }
 
 return;
+
+void PartitionFileWrite(string path, string resultPath)
+{
+    var sb = new StringBuilder();
+    var fileCounter = 1;
+    var lineCounter = 0;
+
+    var date = Path.GetFileName(path)[..^4];
+    var resultDirectoryPath = @$"{resultPath}\{date}";
+
+    Directory.CreateDirectory(resultDirectoryPath);
+
+    using var reader = new StreamReader(path);
+    while (reader.ReadLine() is { } line)
+    {
+        sb.AppendLine(line);
+        lineCounter++;
+
+        if (lineCounter >= 500000)
+        {
+            File.WriteAllText(@$"{resultDirectoryPath}\{date}_P{fileCounter}.txt", sb.ToString());
+            fileCounter++;
+            sb.Clear();
+            lineCounter = 0;
+        }
+    }
+
+    if (lineCounter > 0)
+    {
+        File.WriteAllText(@$"{resultDirectoryPath}\{date}_P{fileCounter}.txt", sb.ToString());
+    }
+}
+
 
 string ReadComposeFile(DateCollection collection)
 {
@@ -304,6 +349,7 @@ internal class DateCollection(string date, List<string> filePaths)
 
     public List<string> FilePaths { get; set; } = filePaths;
 }
+
 
 internal class StopwatchTimer(string message = "Elapsed time") : IDisposable
 {
