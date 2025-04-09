@@ -16,4 +16,8 @@
       <Folder Include="result\" />
     </ItemGroup>
 
+    <ItemGroup>
+      <PackageReference Include="AWSSDK.S3" Version="4.0.0-preview.12" />
+    </ItemGroup>
+
 </Project>

@@ -3,6 +3,12 @@ using System.IO.Compression;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using Amazon.Runtime;
+using Amazon.S3;
+using Amazon.S3.Model;
+
+var filesDirectory = @"..\..\..\files";
+var resultDirectory = @"E:\LogsResult\";
 
 var rootDirectory = @"..\..\..\files";
 
@@ -11,8 +17,10 @@ try
     using (new StopwatchTimer("Process finished in: "))
     {
         // Unpack, read and sort files 
-        // var fileCollections = GroupFilesByName(GetFilePaths(rootDirectory, "*.gz"));
-        //
+        // Read files from local drive
+        // var filePaths = GetFilePaths(filesDirectory, "*.gz");
+        // var fileCollections = GroupFilesByName(filePaths);
+
         // Parallel.ForEach(fileCollections, new ParallelOptions { MaxDegreeOfParallelism = 3 },
         //     collection =>
         //     {
@@ -23,13 +31,15 @@ try
         //                 try
         //                 {
         //                     Console.WriteLine($"Start Processing file {collection.Date}");
-        //                     WriteFile(ProcessFileJson(SortLines(ConvertComposedFile(ReadComposeFile(collection)))),
+        //                     WriteFile(ProcessFileJson(SortLines(ConvertComposedFile(LocalReadComposeFile(collection)))),
         //                         resultDirectory + collection.Date);
         //                 }
         //                 catch (OutOfMemoryException e)
         //                 {
         //                     //Attempt to process using slower method reading file line by line
-        //                     WriteArrayFile(ProcessJsonList(SortLines(ReadComposeFileLines(collection))),
+        //                     Console.WriteLine(
+        //                         $"Date {collection.Date} errored out with OutOfMemoryException, attempting to use different method");
+        //                     WriteArrayFile(ProcessJsonList(SortLines(LocalReadComposeFileAsLines(collection))),
         //                         resultDirectory + collection.Date);
         //                 }
         //                 catch (Exception e)
@@ -44,6 +54,49 @@ try
         //             Console.WriteLine($"File skipped {collection.Date}");
         //         }
         //     });
+        //
+
+        // Read files from amazon
+         var amazonFiles = await AmazonReadComposePaths();
+         var remainingDates = amazonFiles.TakeLast(7).ToList();
+        
+         foreach (var collection in remainingDates)
+         {
+             if (!File.Exists(resultDirectory + collection.Date))
+             {
+                 using (new StopwatchTimer($"Date {collection.Date} finished processing in: "))
+                 {
+                     try
+                     {
+                         Console.WriteLine($"Start Processing file {collection.Date}");
+                         WriteFile(
+                             ProcessFileJson(
+                                 SortLines(ConvertComposedFile(await AmazonReadComposeFile(collection)))),
+                             resultDirectory + collection.Date);
+                     }
+                     catch (OutOfMemoryException e)
+                     {
+                         //Attempt to process using slower method reading file line by line
+                         Console.WriteLine(
+                             $"Date {collection.Date} errored out with OutOfMemoryException, attempting to use different method");
+                         WriteArrayFile(ProcessJsonList(SortLines(await AmazonReadComposeFileAsLines(collection))),
+                             resultDirectory + collection.Date);
+                     }
+                     catch (Exception e)
+                     {
+                         Console.Write($"File {collection.Date} errored out with an exception ");
+                         Console.WriteLine(e);
+                     }
+                 }
+             }
+             else
+             {
+                 Console.WriteLine($"File skipped {collection.Date}");
+             } 
+         }
+
+            
+        
 
 
         // Partition files
@@ -57,6 +110,13 @@ try
         //     
         //     FileDelete(path);
         // }
+
+        // Test GetFilePathsHistorically paths
+        // var partitionedLogsHistoricalOrderPaths = GetFilePathsHistorically(partitionResultDirectory, "*.txt");
+        // foreach (var path in partitionedLogsHistoricalOrderPaths)
+        // {
+        //     Console.WriteLine(path);
+        // }
     }
 }
 
@@ -66,6 +126,115 @@ catch (Exception ex)
 }
 
 return;
+
+async Task<List<DateCollection>> AmazonReadComposePaths()
+{
+    var folders = await ListFoldersAsync(bucketName, prefix);
+    var sortedPaths = folders.OrderBy(path =>
+    {
+        var parts = path.Split('/');
+        return int.Parse(parts[3]);
+    }).ToList();
+
+    var allFilePaths = new List<string>();
+
+    foreach (var folder in sortedPaths)
+    {
+        var filesList = await ListFilesAsync(bucketName, folder);
+        var sortedList = filesList.OrderBy(obj => obj.LastModified)
+            .ToList();
+
+        foreach (var fileS3Object in sortedList)
+        {
+            allFilePaths.Add(fileS3Object.Key);
+        }
+    }
+
+    return GroupFilesByName(allFilePaths.ToArray());
+}
+
+async Task DownloadFileAsync(string key, string localFilePath)
+{
+    var request = new GetObjectRequest
+    {
+        BucketName = bucketName,
+        Key = key
+    };
+
+    var keyPathParts = key.Split('/');
+
+    using var response = await amazonS3Client.GetObjectAsync(request);
+    await response.WriteResponseStreamToFileAsync(@$"{localFilePath}\\{keyPathParts[3]}\\{keyPathParts[4]}", false,
+        CancellationToken.None);
+}
+
+async Task<string> AmazonFileToStringAsync(string key)
+{
+    var request = new GetObjectRequest
+    {
+        BucketName = bucketName,
+        Key = key
+    };
+
+    using var response = await amazonS3Client.GetObjectAsync(request);
+    await using var gzipStream = new GZipStream(response.ResponseStream, CompressionMode.Decompress);
+    using var reader = new StreamReader(gzipStream, Encoding.UTF8);
+    return await reader.ReadToEndAsync();
+}
+
+async Task<StreamReader> AmazonFileGetReader(string key)
+{
+    var request = new GetObjectRequest
+    {
+        BucketName = bucketName,
+        Key = key
+    };
+
+    using var response = await amazonS3Client.GetObjectAsync(request);
+    await using var gzipStream = new GZipStream(response.ResponseStream, CompressionMode.Decompress);
+    return new StreamReader(gzipStream, Encoding.UTF8);
+}
+
+Task<AmazonS3Client> ConnectAmazonS3()
+{
+    var credentials = new BasicAWSCredentials(accessKey, secretKey);
+    var config = new AmazonS3Config
+    {
+        ServiceURL = serviceUrl,
+        ForcePathStyle = true
+    };
+
+    var client = new AmazonS3Client(credentials, config);
+    return Task.FromResult(client);
+}
+
+async Task<List<string>> ListFoldersAsync(string bucketName, string prefix = "")
+{
+    var request = new ListObjectsV2Request
+    {
+        BucketName = bucketName,
+        Prefix = prefix,
+        Delimiter = "/"
+    };
+
+    var response = await amazonS3Client.ListObjectsV2Async(request);
+
+    return response.CommonPrefixes;
+}
+
+async Task<List<S3Object>> ListFilesAsync(string bucketName, string prefix = "")
+{
+    var request = new ListObjectsV2Request
+    {
+        BucketName = bucketName,
+        Prefix = prefix,
+        Delimiter = "/"
+    };
+
+    var response = await amazonS3Client.ListObjectsV2Async(request);
+
+    return response.S3Objects;
+}
 
 void PartitionFileWrite(string path, string resultPath)
 {
@@ -100,7 +269,7 @@ void PartitionFileWrite(string path, string resultPath)
 }
 
 
-string ReadComposeFile(DateCollection collection)
+string LocalReadComposeFile(DateCollection collection)
 {
     var mergedFilesBuilder = new StringBuilder();
     foreach (string filePath in collection.FilePaths)
@@ -112,13 +281,42 @@ string ReadComposeFile(DateCollection collection)
     return mergedFilesBuilder.ToString();
 }
 
-string?[] ReadComposeFileLines(DateCollection collection)
+
+async Task<string> AmazonReadComposeFile(DateCollection collection)
+{
+    var mergedFilesBuilder = new StringBuilder();
+    foreach (var filePath in collection.FilePaths)
+    {
+        var amazonFile = await AmazonFileToStringAsync(filePath);
+        mergedFilesBuilder.AppendLine(amazonFile);
+    }
+
+    return mergedFilesBuilder.ToString();
+}
+
+string?[] LocalReadComposeFileAsLines(DateCollection collection)
 {
     var lines = new List<string?>();
 
     foreach (string filePath in collection.FilePaths)
     {
         using var reader = OpenGzipFile(filePath);
+        while (reader.ReadLine() is { } line)
+        {
+            lines.Add(line);
+        }
+    }
+
+    return lines.ToArray();
+}
+
+async Task<string?[]> AmazonReadComposeFileAsLines(DateCollection collection)
+{
+    var lines = new List<string?>();
+
+    foreach (var filePath in collection.FilePaths)
+    {
+        using var reader = await AmazonFileGetReader(filePath);
         while (reader.ReadLine() is { } line)
         {
             lines.Add(line);
@@ -280,17 +478,35 @@ int GetLastElementSize(JsonNode jsonNode)
 
 string[] GetFilePathsHistorically(string directory, string pattern)
 {
-    string[] filePaths = Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
+    var filePaths = Directory.GetFiles(directory, pattern, SearchOption.AllDirectories);
 
     Array.Sort(filePaths, (a, b) =>
     {
         var fileNameA = Path.GetFileNameWithoutExtension(a);
         var fileNameB = Path.GetFileNameWithoutExtension(b);
 
-        if (DateTime.TryParse(fileNameA, out var dateA) &&
-            DateTime.TryParse(fileNameB, out var dateB))
+        var datePart1 = fileNameA.Split('_')[0];
+        var datePart2 = fileNameB.Split('_')[0];
+
+
+        if (DateTime.TryParse(datePart1, out var dateA) &&
+            DateTime.TryParse(datePart2, out var dateB))
         {
-            return DateTime.Compare(dateA, dateB);
+            var dateComparison = DateTime.Compare(dateA, dateB);
+            if (dateComparison != 0)
+                return dateComparison;
+        }
+
+        if (fileNameA.Contains("_P") && fileNameB.Contains("_P"))
+        {
+            var partA = fileNameA.Split('_')[1];
+            var partB = fileNameB.Split('_')[1];
+
+            if (int.TryParse(partA.Substring(1), out var numA) &&
+                int.TryParse(partB.Substring(1), out var numB))
+            {
+                return numA.CompareTo(numB);
+            }
         }
 
         return string.CompareOrdinal(fileNameA, fileNameB);
@@ -306,18 +522,18 @@ string[] GetFilePaths(string directory, string pattern)
 
 void WriteFile(string file, string path)
 {
+    path = path[..^2] + "txt";
     Console.WriteLine($"File written {path}");
     File.WriteAllText(path, file);
 }
 
 void WriteArrayFile(string[] lines, string filePath)
 {
-    using (StreamWriter writer = new StreamWriter(filePath))
+    Console.WriteLine($"File written {filePath}");
+    using var writer = new StreamWriter(filePath);
+    foreach (string line in lines)
     {
-        foreach (string line in lines)
-        {
-            writer.WriteLine(line);
-        }
+        writer.WriteLine(line);
     }
 }
 
@@ -339,12 +555,12 @@ List<DateCollection> GroupFilesByName(string[] filePaths)
 
 internal class DateCollection(string date, List<string> filePaths)
 {
-    private string _date = date[..^2] + "txt";
+    private string _date = date;
 
     public string Date
     {
         get => _date;
-        set => _date = value[..^2] + "txt";
+        set => _date = value;
     }
 
     public List<string> FilePaths { get; set; } = filePaths;
