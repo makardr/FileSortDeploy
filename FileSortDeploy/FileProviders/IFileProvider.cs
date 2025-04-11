@@ -1,4 +1,4 @@
-using FileSortDeploy.values;
+using FileSortDeploy.Values;
 
 namespace FileSortDeploy.FileProviders;
 

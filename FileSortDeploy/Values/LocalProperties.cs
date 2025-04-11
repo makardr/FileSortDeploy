@@ -1,4 +1,4 @@
-namespace FileSortDeploy.values;
+namespace FileSortDeploy.Values;
 
 public class LocalProperties(string inputPath, string resultPath)
 {

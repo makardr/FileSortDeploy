@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace FileSortDeploy.helpers;
+namespace FileSortDeploy.Helpers;
 
 public class StopwatchTimer(string message = "Elapsed time") : IDisposable
 {

@@ -1,4 +1,4 @@
-namespace FileSortDeploy.values;
+namespace FileSortDeploy.Values;
 
 public class DateCollection(string date, List<string> filePaths)
 {

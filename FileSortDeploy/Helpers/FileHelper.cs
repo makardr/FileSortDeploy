@@ -1,7 +1,7 @@
 using System.Text;
-using FileSortDeploy.values;
+using FileSortDeploy.Values;
 
-namespace FileSortDeploy.FileProviders;
+namespace FileSortDeploy.Helpers;
 
 public static class FileHelper
 {

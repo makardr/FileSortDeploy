@@ -1,10 +1,11 @@
 using System.IO.Compression;
 using System.Text;
-using FileSortDeploy.values;
+using FileSortDeploy.Helpers;
+using FileSortDeploy.Values;
 
 namespace FileSortDeploy.FileProviders;
 
-public class LocalFileProvider(LocalProperties properties) : IFileProvider
+internal class LocalFileProvider(LocalProperties properties) : IFileProvider
 {
     public Task<List<DateCollection>> ProvideComposedFilePaths()
     {

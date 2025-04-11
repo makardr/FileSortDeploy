@@ -2,8 +2,8 @@
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using FileSortDeploy.FileProviders;
-using FileSortDeploy.helpers;
-using FileSortDeploy.values;
+using FileSortDeploy.Helpers;
+using FileSortDeploy.Values;
 
 namespace FileSortDeploy;
 

@@ -1,4 +1,4 @@
-namespace FileSortDeploy.values;
+namespace FileSortDeploy.Values;
 
 public class AmazonS3Properties(string bucketName, string prefix, string accessKey, string secretKey, string serviceUrl)
 {
