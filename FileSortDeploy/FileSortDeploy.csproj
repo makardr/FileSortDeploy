@@ -8,6 +8,9 @@
     </PropertyGroup>
 
     <ItemGroup>
+      <Folder Include="files\0\" />
+      <Folder Include="files\1\" />
+      <Folder Include="files\2\" />
       <Folder Include="files\3\" />
       <Folder Include="files\4\" />
       <Folder Include="files\5\" />
