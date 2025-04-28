@@ -9,6 +9,6 @@ public class StopwatchTimer(string message = "Elapsed time") : IDisposable
     public void Dispose()
     {
         _stopwatch.Stop();
-        Console.WriteLine($"{message}: {_stopwatch.ElapsedMilliseconds} ms");
+        Console.WriteLine($"{message}: {_stopwatch.ElapsedMilliseconds} ms, RAM: {MemoryMeter.GetMemoryUsage()}  MB");
     }
 }

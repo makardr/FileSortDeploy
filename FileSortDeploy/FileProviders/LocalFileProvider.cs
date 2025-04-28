@@ -15,29 +15,36 @@ internal class LocalFileProvider(LocalProperties properties) : IFileProvider
 
     public Task<string[]> ReadComposedFile(DateCollection collection)
     {
-        var mergedFilesBuilder = new StringBuilder();
-        foreach (var reader in collection.FilePaths.Select(OpenGzipFile))
+        using (new StopwatchTimer("ReadComposedFile"))
         {
-            mergedFilesBuilder.AppendLine(reader.ReadToEnd());
-        }
+            var mergedFilesBuilder = new StringBuilder();
+            foreach (var filePath in collection.FilePaths)
+            {
+                using var reader = OpenGzipFile(filePath);
+                mergedFilesBuilder.AppendLine(reader.ReadToEnd());
+            }
 
-        return Task.FromResult(FileHelper.ConvertComposedFile(mergedFilesBuilder.ToString()));
+            return Task.FromResult(FileHelper.ConvertComposedFile(mergedFilesBuilder.ToString()));
+        }
     }
 
     public Task<string?[]> ReadComposedFileAsLines(DateCollection collection)
     {
-        var lines = new List<string?>();
-
-        foreach (string filePath in collection.FilePaths)
+        using (new StopwatchTimer("ReadComposedFileAsLines"))
         {
-            using var reader = OpenGzipFile(filePath);
-            while (reader.ReadLine() is { } line)
-            {
-                lines.Add(line);
-            }
-        }
+            var lines = new List<string?>();
 
-        return Task.FromResult(lines.ToArray());
+            foreach (string filePath in collection.FilePaths)
+            {
+                using var reader = OpenGzipFile(filePath);
+                while (reader.ReadLine() is { } line)
+                {
+                    lines.Add(line);
+                }
+            }
+
+            return Task.FromResult(lines.ToArray());
+        }
     }
 
     private static StreamReader OpenGzipFile(string filePath)

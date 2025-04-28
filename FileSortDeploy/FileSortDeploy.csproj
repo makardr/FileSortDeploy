@@ -21,6 +21,7 @@
 
     <ItemGroup>
       <PackageReference Include="AWSSDK.S3" Version="4.0.0-preview.12" />
+      <PackageReference Include="dotenv.net" Version="3.2.1" />
     </ItemGroup>
 
 </Project>

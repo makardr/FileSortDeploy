@@ -20,7 +20,7 @@ public static class FileHelper
     {
         List<string> stringList = [];
 
-        using (StringReader reader = new StringReader(file))
+        using (var reader = new StringReader(file))
         {
             while (reader.ReadLine() is { } line)
             {
@@ -69,7 +69,7 @@ public static class FileHelper
 
         return filePaths;
     }
-    
+
     public static void PartitionFileWrite(string path, string resultPath)
     {
         var sb = new StringBuilder();
@@ -104,18 +104,22 @@ public static class FileHelper
 
     public static void WriteFile(string file, string path)
     {
-        path = path[..^2] + "txt";
-        Console.WriteLine($"File written {path}");
-        File.WriteAllText(path, file);
+        using (new StopwatchTimer($"WriteFile {path}"))
+        {
+            path = path[..^2] + "txt";
+            File.WriteAllText(path, file);
+        }
     }
 
     public static void WriteArrayFile(string[] lines, string filePath)
     {
-        Console.WriteLine($"File written {filePath}");
-        using var writer = new StreamWriter(filePath);
-        foreach (string line in lines)
+        using (new StopwatchTimer($"WriteArrayFile {filePath}"))
         {
-            writer.WriteLine(line);
+            using var writer = new StreamWriter(filePath);
+            foreach (var line in lines)
+            {
+                writer.WriteLine(line);
+            }
         }
     }
 

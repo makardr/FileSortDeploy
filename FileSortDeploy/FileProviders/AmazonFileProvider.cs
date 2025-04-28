@@ -64,7 +64,7 @@ public class AmazonFileProvider : IFileProvider
         foreach (var filePath in collection.FilePaths)
         {
             using var reader = await GetReader(filePath);
-            while (reader.ReadLine() is { } line)
+            while (await reader.ReadLineAsync() is { } line)
             {
                 lines.Add(line);
             }
@@ -88,6 +88,7 @@ public class AmazonFileProvider : IFileProvider
         {
             var filesList = await ListFilesAsync(_properties.BucketName, folder);
             var sortedList = filesList.OrderBy(obj => obj.LastModified)
+                // .Take(30)
                 .ToList();
 
             foreach (var fileS3Object in sortedList)
@@ -98,8 +99,8 @@ public class AmazonFileProvider : IFileProvider
 
         foreach (var path in allFilePaths)
         {
-            Console.WriteLine(path);
-            await DownloadFileAsync(path, filesDirectory);
+            Console.WriteLine($"Downloading {path}");
+            await DownloadFilePart(path, filesDirectory);
         }
     }
 
@@ -173,7 +174,7 @@ public class AmazonFileProvider : IFileProvider
         return response.S3Objects;
     }
 
-    private async Task DownloadFileAsync(string key, string downloadPath)
+    private async Task DownloadFilePart(string key, string downloadPath)
     {
         var request = new GetObjectRequest
         {
@@ -185,6 +186,18 @@ public class AmazonFileProvider : IFileProvider
 
         using var response = await _amazonS3Client.GetObjectAsync(request);
         await response.WriteResponseStreamToFileAsync(@$"{downloadPath}\\{keyPathParts[3]}\\{keyPathParts[4]}", false,
+            CancellationToken.None);
+    }
+
+    public async Task DownloadFile(string keyFrom, string toDownloadPath)
+    {
+        var request = new GetObjectRequest
+        {
+            BucketName = _properties.BucketName,
+            Key = keyFrom
+        };
+        using var response = await _amazonS3Client.GetObjectAsync(request);
+        await response.WriteResponseStreamToFileAsync(@$"{toDownloadPath}\{keyFrom}", false,
             CancellationToken.None);
     }
 }

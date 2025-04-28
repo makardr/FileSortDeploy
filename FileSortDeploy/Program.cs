@@ -4,6 +4,8 @@ using System.Text.Json.Nodes;
 using FileSortDeploy.FileProviders;
 using FileSortDeploy.Helpers;
 using FileSortDeploy.Values;
+using dotenv.net;
+using dotenv.net.Utilities;
 
 namespace FileSortDeploy;
 
@@ -16,24 +18,27 @@ public static class Program
         @"E:\LogsResult\"
     );
 
-    private static AmazonS3Properties _amazonS3Properties = new
-    (
-        "",
-        "",
-        "",
-        "",
-        ""
-    );
-    
+    private static AmazonS3Properties? _amazonS3Properties;
+
     public static async Task Main(string[] args)
     {
+        DotEnv.Load(new DotEnvOptions(envFilePaths: new[] { @"..\..\..\.env" }));
+
+        _amazonS3Properties = new AmazonS3Properties(
+            EnvReader.GetStringValue("BUCKET_NAME"),
+            EnvReader.GetStringValue("PREFIX"),
+            EnvReader.GetStringValue("ACCESS_KEY"),
+            EnvReader.GetStringValue("SECRET_KEY"),
+            EnvReader.GetStringValue("SERVICE_URL")
+        );
         try
         {
             using (new StopwatchTimer("Process finished in: "))
             {
+                // Download file from amazon storage
                 // var fileProvider = new AmazonFileProvider(_amazonS3Properties);
-                // await fileProvider.DownloadAllFromDrive(_localProperties.InputPath);
-
+                // await fileProvider.DownloadFile("events.parquet", @"E:\PartitionedLogs");
+                Console.WriteLine($"RAM: {MemoryMeter.GetMemoryUsage()}");
                 var fileProvider = new LocalFileProvider(LocalProperties);
                 var filePaths = await fileProvider.ProvideComposedFilePaths();
 
@@ -45,7 +50,7 @@ public static class Program
                         {
                             try
                             {
-                                Console.WriteLine($"Start Processing file {collection.Date}");
+                                Console.WriteLine($"Start Processing file {collection.Date} ");
                                 FileHelper.WriteFile(
                                     ProcessFileJson(
                                         SortLines(await fileProvider.ReadComposedFile(collection))),
@@ -53,7 +58,7 @@ public static class Program
                             }
                             catch (OutOfMemoryException e)
                             {
-                                //Attempt to process using slower method reading file line by line
+                                //Attempt to process using the slower method reading file line by line
                                 Console.WriteLine(
                                     $"Date {collection.Date} errored out with OutOfMemoryException, attempting to use different method");
                                 FileHelper.WriteArrayFile(
@@ -95,104 +100,111 @@ public static class Program
 
     private static string[] SortLines(string?[] inputFilePath)
     {
-        return inputFilePath
-            .Select(line =>
-            {
-                try
+        using (new StopwatchTimer("SortLines"))
+        {
+            return inputFilePath
+                .Select(line =>
                 {
-                    var jsonNode = JsonNode.Parse(line);
-                    return new
+                    try
                     {
-                        OriginalLine = line,
-                        FirstTimestamp = jsonNode[0].GetValue<long>()
-                    };
-                }
-                catch (JsonException)
-                {
-                    // Console.WriteLine($"Could not parse line: {line}");
-                    return null;
-                }
-                catch (Exception ex)
-                {
-                    // Console.WriteLine($"Unexpected error parsing line: {line}. Error: {ex.Message}");
-                    return null;
-                }
-            })
-            .Where(x => x != null)
-            .OrderBy(x => x!.FirstTimestamp)
-            .Select(x => x!.OriginalLine)
-            .ToArray();
+                        var jsonNode = JsonNode.Parse(line);
+                        return new
+                        {
+                            OriginalLine = line,
+                            FirstTimestamp = jsonNode[0].GetValue<long>()
+                        };
+                    }
+                    catch (JsonException)
+                    {
+                        // Console.WriteLine($"Could not parse line: {line}");
+                        return null;
+                    }
+                    catch (Exception ex)
+                    {
+                        // Console.WriteLine($"Unexpected error parsing line: {line}. Error: {ex.Message}");
+                        return null;
+                    }
+                })
+                .Where(x => x != null)
+                .OrderBy(x => x!.FirstTimestamp)
+                .Select(x => x!.OriginalLine)
+                .ToArray();
+        }
     }
 
     private static string ProcessFileJson(string[] lines)
     {
-        // var maxJsonSize = 0;
-        // var largestLine = "";
-        var processedFileBuilder = new StringBuilder();
-
-        foreach (var line in lines)
+        using (new StopwatchTimer("ProcessFileJson"))
         {
-            try
+            var processedFileBuilder = new StringBuilder();
+
+            foreach (var line in lines)
             {
-                var jsonNode = JsonNode.Parse(line);
-                if (jsonNode != null)
+                try
                 {
-                    jsonNode.AsArray().RemoveAt(0);
-                    var jsonString = jsonNode.ToJsonString();
-                    processedFileBuilder.AppendLine(jsonString);
+                    var jsonNode = JsonNode.Parse(line);
+                    if (jsonNode != null)
+                    {
+                        jsonNode.AsArray().RemoveAt(0);
+                        var jsonString = jsonNode.ToJsonString();
+                        processedFileBuilder.AppendLine(jsonString);
 
 
-                    // var lastElementSize = GetLastElementSize(jsonNode);
-                    // if (lastElementSize > maxJsonSize)
-                    // {
-                    //     maxJsonSize = lastElementSize;
-                    //     largestLine = jsonString;
-                    // }
+                        // var lastElementSize = GetLastElementSize(jsonNode);
+                        // if (lastElementSize > maxJsonSize)
+                        // {
+                        //     maxJsonSize = lastElementSize;
+                        //     largestLine = jsonString;
+                        // }
+                    }
+                    else
+                    {
+                        // Console.WriteLine("Line was null");
+                    }
                 }
-                else
+                catch (Exception ex)
                 {
-                    // Console.WriteLine("Line was null");
+                    // Console.WriteLine(ex.Message);
                 }
             }
-            catch (Exception ex)
-            {
-                // Console.WriteLine(ex.Message);
-            }
+
+            // Console.WriteLine("Largest json size: " + maxJsonSize);
+            // Console.WriteLine("Largest json line: " + largestLine);
+            return processedFileBuilder.ToString();
         }
-
-        // Console.WriteLine("Largest json size: " + maxJsonSize);
-        // Console.WriteLine("Largest json line: " + largestLine);
-        return processedFileBuilder.ToString();
     }
 
 
     private static string[] ProcessJsonList(string[] lines)
     {
-        List<string> stringList = [];
-
-        foreach (var line in lines)
+        using (new StopwatchTimer("ProcessJsonList"))
         {
-            try
-            {
-                var jsonNode = JsonNode.Parse(line);
-                if (jsonNode != null)
-                {
-                    jsonNode.AsArray().RemoveAt(0);
-                    var jsonString = jsonNode.ToJsonString();
-                    stringList.Add(jsonString);
-                }
-                else
-                {
-                    // Console.WriteLine("Line was null");
-                }
-            }
-            catch (Exception ex)
-            {
-                // Console.WriteLine(ex.Message);
-            }
-        }
+            List<string> stringList = [];
 
-        return stringList.ToArray();
+            foreach (var line in lines)
+            {
+                try
+                {
+                    var jsonNode = JsonNode.Parse(line);
+                    if (jsonNode != null)
+                    {
+                        jsonNode.AsArray().RemoveAt(0);
+                        var jsonString = jsonNode.ToJsonString();
+                        stringList.Add(jsonString);
+                    }
+                    else
+                    {
+                        // Console.WriteLine("Line was null");
+                    }
+                }
+                catch (Exception ex)
+                {
+                    // Console.WriteLine(ex.Message);
+                }
+            }
+
+            return stringList.ToArray();
+        }
     }
 
     private static int GetLastElementSize(JsonNode jsonNode)
